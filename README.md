@@ -138,9 +138,10 @@ RuntimeError: Your system has an unsupported version of sqlite3. Chroma requires
 
 The app now forces Chroma to use the `duckdb+parquet` backend (no system sqlite dependency). If the error persists:
 
-1. Ensure you pulled the latest code (where `CHROMA_DB_IMPL=duckdb+parquet` is set before import).
-2. Add `pysqlite3-binary` to `requirements.txt` (already included) as a fallback.
-3. (Rare) Clear the build cache by redeploying (on Streamlit Cloud: Settings → Clear cache → Reboot).
+1. Ensure you pulled the latest code (which now forces `CHROMA_DB_IMPL=duckdb+parquet`).
+2. `pysqlite3-binary` is installed to satisfy a modern sqlite symbol set if needed.
+3. The app will automatically FALL BACK to an in‑memory FAISS index when Chroma cannot initialize (you will see a warning in the UI). This means persistence is lost for that session, but functionality continues.
+4. (Rare) Clear the build cache: Streamlit Cloud → Settings → Clear cache → Reboot.
 
 ### Summarization Chain Update
 

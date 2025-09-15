@@ -13,10 +13,17 @@ os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
-from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
+
+# Attempt proactive sqlite replacement if available (some hosts ship old sqlite3)
+try:
+    import pysqlite3  # type: ignore
+    import sys as _sys
+    _sys.modules["sqlite3"] = _sys.modules["pysqlite3"]
+except Exception:
+    pass  # Not fatal; fallback logic later will still handle errors
 
 # Load environment variables from .env file
 load_dotenv()
@@ -108,21 +115,21 @@ def create_vectorstore(uploaded_files):
 
     embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
 
+    # Lazy import Chroma so that sqlite monkeypatch above is in effect
     try:
+        from langchain_chroma import Chroma  # type: ignore
         vectorstore = Chroma.from_documents(all_chunks, embedding=embeddings, persist_directory=persist_dir)
-    except RuntimeError as rte:
-        # As a last resort, attempt sqlite replacement if duckdb wasn't honored
+    except Exception as rte:
+        # Any failure -> fallback to FAISS (memory only, no persistence)
         if "sqlite" in str(rte).lower():
-            st.warning("Encountered sqlite runtime issue; trying bundled pysqlite3 fallback.")
-            try:
-                import pysqlite3  # type: ignore
-                import sys
-                sys.modules["sqlite3"] = sys.modules["pysqlite3"]
-                vectorstore = Chroma.from_documents(all_chunks, embedding=embeddings, persist_directory=persist_dir)
-            except Exception as inner:
-                raise RuntimeError(f"Chroma initialization failed after fallback: {inner}") from inner
+            st.warning("Chroma backend unavailable due to sqlite version; falling back to FAISS (no persistence).")
         else:
-            raise
+            st.warning(f"Chroma unavailable ({rte}); using FAISS fallback.")
+        try:
+            from langchain_community.vectorstores import FAISS  # type: ignore
+            vectorstore = FAISS.from_documents(all_chunks, embeddings)
+        except Exception as inner:
+            raise RuntimeError(f"Both Chroma and FAISS initialization failed: {inner}") from inner
 
     # Persist to disk explicitly (duckdb backend persists automatically, but be explicit)
     try:
