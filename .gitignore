@@ -1,6 +1,32 @@
 # .gitignore
+
+# Virtual environment & Python caches
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Environment / secrets
 .env
+*.env
+
+# Logs
 *.log
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+
+# Streamlit (cache & internal)
+.streamlit/
+
+# Chroma vector store (regenerated / ephemeral in deployment)
+chroma_db/
+
+# Build artifacts
+dist/
+build/
+site/

@@ -2,6 +2,14 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import streamlit as st  # For Streamlit Cloud secrets fallback
+
+# --- Chroma backend configuration BEFORE importing chroma/langchain_chroma ---
+# Streamlit Cloud (and some slim containers) can have an older system sqlite (<3.35)
+# which triggers chromadb's runtime check. Force the duckdb+parquet backend to avoid
+# reliance on system sqlite. Also disable telemetry in ephemeral academic/demo usage.
+os.environ.setdefault("CHROMA_DB_IMPL", "duckdb+parquet")
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "false")
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
@@ -81,17 +89,48 @@ def load_and_chunk_file(filepath: Path):
     return split_docs
 
 def create_vectorstore(uploaded_files):
-    """Build a Chroma vectorstore from uploaded files."""
+    """Build (or extend) a Chroma vectorstore from uploaded files.
+
+    Uses a persistent directory so subsequent questions in same session
+    don't require re-embedding if identical files are re-uploaded.
+    """
+    persist_dir = "chroma_db"
     all_chunks = []
     for f in uploaded_files:
-        chunks = load_and_chunk_file(f)
-        all_chunks.extend(chunks)
+        try:
+            chunks = load_and_chunk_file(f)
+            all_chunks.extend(chunks)
+        except Exception as e:
+            st.warning(f"Failed to process {f.name}: {e}")
 
-    # Generate embeddings for all chunks
-    embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2") 
-    # Store vectors in Chroma DB
-    vectorstore = Chroma.from_documents(all_chunks, embedding=embeddings)
-    # Create retriever for similarity search
+    if not all_chunks:
+        raise ValueError("No valid documents to index.")
+
+    embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+
+    try:
+        vectorstore = Chroma.from_documents(all_chunks, embedding=embeddings, persist_directory=persist_dir)
+    except RuntimeError as rte:
+        # As a last resort, attempt sqlite replacement if duckdb wasn't honored
+        if "sqlite" in str(rte).lower():
+            st.warning("Encountered sqlite runtime issue; trying bundled pysqlite3 fallback.")
+            try:
+                import pysqlite3  # type: ignore
+                import sys
+                sys.modules["sqlite3"] = sys.modules["pysqlite3"]
+                vectorstore = Chroma.from_documents(all_chunks, embedding=embeddings, persist_directory=persist_dir)
+            except Exception as inner:
+                raise RuntimeError(f"Chroma initialization failed after fallback: {inner}") from inner
+        else:
+            raise
+
+    # Persist to disk explicitly (duckdb backend persists automatically, but be explicit)
+    try:
+        vectorstore.persist()
+    except Exception:
+        # Non-fatal; continue
+        pass
+
     retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 4})
     return retriever
 
@@ -134,24 +173,26 @@ def build_rag_chain(retriever):
     return rag_chain
 
 def build_summary_chain(file_path):
-    """Create a chain to summarize the content of a textbook/note."""
+    """Create a chain to summarize the content of a textbook/note.
+
+    Returns a runnable that accepts an (optional) topic or focus string
+    and generates a summary grounded in the file's text.
+    """
     chunks = load_and_chunk_file(file_path)
-    # Concatenate all chunk contents for summarization
-    # We intentionally keep chunk retrieval inside the chain so context can be formatted in the prompt when invoked.
     context = "\n".join(doc.page_content for doc in chunks)
     template = """
-    You are a helpful AI tutor. 
-    Summarize the content of the textbook/notes provided for a student.
-    
-    Context: {context}
+    You are a helpful AI tutor.
+    Provide a concise, student-friendly summary of the provided material.
+    If the user supplies a focus/topic, emphasize that topic while still covering key ideas.
+
+    Topic / Focus: {topic}
+    Source Context:
+    {context}
     """
-
     prompt = ChatPromptTemplate.from_template(template)
-    
-    # Build the chain: prompt -> LLM
-    summary_chain = (
-        prompt
-        | llm
-    )
 
+    def supply_inputs(user_topic: str = ""):
+        return {"topic": user_topic or "(general overview)", "context": context}
+
+    summary_chain = (RunnablePassthrough() | supply_inputs | prompt | llm)
     return summary_chain

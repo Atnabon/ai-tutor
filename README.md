@@ -128,6 +128,28 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 
 - **Tokenizer Parallelism Warning:** We set `TOKENIZERS_PARALLELISM=false` automatically to avoid fork warnings. You can override this in your shell if desired.
 
+### Chroma / SQLite Error on Deployment (Streamlit Cloud)
+
+If you encounter an error like:
+
+```
+RuntimeError: Your system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.
+```
+
+The app now forces Chroma to use the `duckdb+parquet` backend (no system sqlite dependency). If the error persists:
+
+1. Ensure you pulled the latest code (where `CHROMA_DB_IMPL=duckdb+parquet` is set before import).
+2. Add `pysqlite3-binary` to `requirements.txt` (already included) as a fallback.
+3. (Rare) Clear the build cache by redeploying (on Streamlit Cloud: Settings → Clear cache → Reboot).
+
+### Summarization Chain Update
+
+The summarization now accepts an optional topic/focus you type. If left blank, a general overview is produced.
+
+### Security: API Key Exposure
+
+If you accidentally committed a real `GROQ_API_KEY` (even once), rotate it in the Groq console immediately and remove/replace any leaked value. Always store secrets in Streamlit Cloud via "App → Settings → Secrets".
+
 ---
 
 ## 🚀 Deployment (Streamlit Community Cloud)
