@@ -1,4 +1,4 @@
-# 📘 AI Tutor - Learn From Your Own Books
+# 📘 AI Tutor 
 
 AI Tutor is a Streamlit web application that allows students and educators to upload their own textbooks or notes (PDFs), ask questions, and receive AI-generated answers and summaries grounded in their materials. The app uses LangChain for document processing, retrieval, and LLM-powered generation.
 
@@ -26,7 +26,7 @@ AI Tutor is a Streamlit web application that allows students and educators to up
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/yourusername/textbook-tutor.git
+   git clone https://github.com/atnabon/ai-tutor.git
    cd textbook-tutor
    ```
 
