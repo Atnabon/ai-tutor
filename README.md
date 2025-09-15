@@ -27,7 +27,7 @@ AI Tutor is a Streamlit web application that allows students and educators to up
 1. **Clone the repository:**
    ```sh
    git clone https://github.com/atnabon/ai-tutor.git
-   cd textbook-tutor
+   cd ai-tutor
    ```
 
 2. **Create and activate a virtual environment:**
