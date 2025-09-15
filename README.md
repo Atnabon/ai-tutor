@@ -143,6 +143,18 @@ The app now forces Chroma to use the `duckdb+parquet` backend (no system sqlite 
 3. The app will automatically FALL BACK to an in‑memory FAISS index when Chroma cannot initialize (you will see a warning in the UI). This means persistence is lost for that session, but functionality continues.
 4. (Rare) Clear the build cache: Streamlit Cloud → Settings → Clear cache → Reboot.
 
+### Choosing a Vector Backend
+
+By default the app now uses **FAISS** (in‑memory) to avoid sqlite & deprecation issues. You can opt into Chroma persistence by setting one of:
+
+```
+VECTOR_BACKEND=chroma   # in .env (local) or Streamlit Secrets
+```
+
+If `VECTOR_BACKEND` is omitted or set to anything else, FAISS is used. When Chroma is enabled the app will try the modern `PersistentClient` API and store data under `chroma_db/` (ignored by git). If initialization fails, it automatically falls back to FAISS so users aren’t blocked.
+
+If you are satisfied with FAISS only, you may remove `chromadb` and `langchain-chroma` from `requirements.txt` to slim the environment.
+
 ### Summarization Chain Update
 
 The summarization now accepts an optional topic/focus you type. If left blank, a general overview is produced.

@@ -30,6 +30,7 @@ load_dotenv()
 # Attempt resolution order: explicit env var -> Streamlit secrets -> default
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL") or st.secrets.get("GROQ_MODEL", "llama-3.1-8b-instant")
+VECTOR_BACKEND = (os.getenv("VECTOR_BACKEND") or st.secrets.get("VECTOR_BACKEND") or "faiss").lower()
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 
@@ -96,12 +97,10 @@ def load_and_chunk_file(filepath: Path):
     return split_docs
 
 def create_vectorstore(uploaded_files):
-    """Build (or extend) a Chroma vectorstore from uploaded files.
+    """Build a vector store (FAISS by default, optional Chroma).
 
-    Uses a persistent directory so subsequent questions in same session
-    don't require re-embedding if identical files are re-uploaded.
+    Controlled by VECTOR_BACKEND env/secret: 'faiss' (default) or 'chroma'.
     """
-    persist_dir = "chroma_db"
     all_chunks = []
     for f in uploaded_files:
         try:
@@ -109,34 +108,35 @@ def create_vectorstore(uploaded_files):
             all_chunks.extend(chunks)
         except Exception as e:
             st.warning(f"Failed to process {f.name}: {e}")
-
     if not all_chunks:
         raise ValueError("No valid documents to index.")
 
     embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
 
-    # Lazy import Chroma so that sqlite monkeypatch above is in effect
-    try:
-        from langchain_chroma import Chroma  # type: ignore
-        vectorstore = Chroma.from_documents(all_chunks, embedding=embeddings, persist_directory=persist_dir)
-    except Exception as rte:
-        # Any failure -> fallback to FAISS (memory only, no persistence)
-        if "sqlite" in str(rte).lower():
-            st.warning("Chroma backend unavailable due to sqlite version; falling back to FAISS (no persistence).")
-        else:
-            st.warning(f"Chroma unavailable ({rte}); using FAISS fallback.")
+    if VECTOR_BACKEND == "chroma":
         try:
+            # Modern client usage (avoids deprecated path)
+            import chromadb  # type: ignore
+            from chromadb.config import Settings  # type: ignore
+            from langchain_chroma import Chroma  # type: ignore
+            persist_dir = "chroma_db"
+            client = chromadb.PersistentClient(path=persist_dir, settings=Settings(allow_reset=True))
+            collection_name = "documents"
+            # Build from docs manually to ensure using existing or new collection
+            vectorstore = Chroma.from_documents(
+                all_chunks,
+                embedding=embeddings,
+                client=client,
+                collection_name=collection_name,
+            )
+        except Exception as e:
+            st.warning(f"Chroma failed ({e}); switching to FAISS in-memory.")
             from langchain_community.vectorstores import FAISS  # type: ignore
             vectorstore = FAISS.from_documents(all_chunks, embeddings)
-        except Exception as inner:
-            raise RuntimeError(f"Both Chroma and FAISS initialization failed: {inner}") from inner
-
-    # Persist to disk explicitly (duckdb backend persists automatically, but be explicit)
-    try:
-        vectorstore.persist()
-    except Exception:
-        # Non-fatal; continue
-        pass
+    else:
+        # Default FAISS simple path
+        from langchain_community.vectorstores import FAISS  # type: ignore
+        vectorstore = FAISS.from_documents(all_chunks, embeddings)
 
     retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 4})
     return retriever
